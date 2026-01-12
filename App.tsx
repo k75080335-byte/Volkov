@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { KEY_PERSONNEL, SYSTEM_PROMPT_TEMPLATE } from './constants';
@@ -17,16 +16,22 @@ const App: React.FC = () => {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // 로딩 바 애니메이션
+  const API_KEY = process.env.API_KEY || '';
+
+  // 로딩 애니메이션
   useEffect(() => {
     if (loading) {
-      const timer1 = setTimeout(() => setProgress(30), 200);
-      const timer2 = setTimeout(() => setProgress(70), 800);
-      const timer3 = setTimeout(() => {
-        setProgress(100);
-        setTimeout(() => setShowEnter(true), 500);
-      }, 1500);
-      return () => { clearTimeout(timer1); clearTimeout(timer2); clearTimeout(timer3); };
+      const timer = setInterval(() => {
+        setProgress(prev => {
+          if (prev >= 100) {
+            clearInterval(timer);
+            setShowEnter(true);
+            return 100;
+          }
+          return prev + 5;
+        });
+      }, 100);
+      return () => clearInterval(timer);
     }
   }, [loading]);
 
@@ -37,10 +42,14 @@ const App: React.FC = () => {
   const handleEnter = () => setLoading(false);
 
   const startStory = async () => {
+    if (!API_KEY) {
+      alert("환경 변수 API_KEY가 설정되지 않았습니다. Cloudflare 대시보드에서 설정해 주세요.");
+      return;
+    }
     setStep('chat');
     setIsAiLoading(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+      const ai = new GoogleGenAI({ apiKey: API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
         contents: "신규 세션을 시작하라. 팍한의 집무실에서 주인공을 맞이하는 장면으로.",
@@ -51,14 +60,14 @@ const App: React.FC = () => {
       });
       setMessages([{ 
         role: 'assistant', 
-        content: response.text || "시스템 오류: 응답을 가져올 수 없습니다.", 
+        content: response.text || "침묵만이 흐릅니다...", 
         timestamp: new Date().toLocaleTimeString() 
       }]);
     } catch (e) {
       console.error(e);
       setMessages([{ 
         role: 'system', 
-        content: "통신 오류가 발생했습니다. API 키 설정을 확인하세요.", 
+        content: "통신 오류: API 키가 유효하지 않거나 설정되지 않았습니다.", 
         timestamp: new Date().toLocaleTimeString() 
       }]);
     } finally {
@@ -76,7 +85,7 @@ const App: React.FC = () => {
     setIsAiLoading(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+      const ai = new GoogleGenAI({ apiKey: API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
         contents: text,
@@ -92,6 +101,11 @@ const App: React.FC = () => {
       }]);
     } catch (e) {
       console.error(e);
+      setMessages(prev => [...prev, { 
+        role: 'system', 
+        content: "서버와의 연결이 원활하지 않습니다.", 
+        timestamp: new Date().toLocaleTimeString() 
+      }]);
     } finally {
       setIsAiLoading(false);
     }
@@ -99,32 +113,29 @@ const App: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="fixed inset-0 bg-black flex flex-col justify-center items-center z-[100] transition-opacity duration-1000">
-        <div className="font-noir text-3xl sm:text-4xl text-white mb-8 tracking-[0.3em] uppercase font-bold text-center px-4">
+      <div className="fixed inset-0 bg-black flex flex-col justify-center items-center z-[100]">
+        <div className="font-noir text-3xl sm:text-4xl text-white mb-8 tracking-[0.3em] uppercase font-bold text-center">
           Entering the White Silence
         </div>
         {!showEnter ? (
           <div className="w-64">
             <div className="h-1 bg-neutral-900 rounded overflow-hidden">
               <div 
-                className="h-full bg-red-900 transition-all duration-1000" 
+                className="h-full bg-red-900 transition-all duration-300" 
                 style={{ width: `${progress}%` }}
               ></div>
             </div>
             <div className="mt-4 font-mono text-[10px] text-neutral-500 tracking-[0.3em] uppercase text-center">
-              DECRYPTING ARCHIVES...
+              DECRYPTING ARCHIVES... {progress}%
             </div>
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-6 animate-pulse">
-            <button 
-              onClick={handleEnter}
-              className="border border-red-900 bg-black text-red-600 px-10 py-3 font-noir tracking-[0.3em] text-xs uppercase hover:bg-red-900 hover:text-white transition-all shadow-[0_0_15px_rgba(139,0,0,0.3)]"
-            >
-              [ ENTER ARCHIVES ]
-            </button>
-            <p className="text-[10px] text-neutral-600 font-script italic">"The Wolf does not howl before the kill."</p>
-          </div>
+          <button 
+            onClick={handleEnter}
+            className="border border-red-900 bg-black text-red-600 px-10 py-3 font-noir tracking-[0.3em] text-xs uppercase hover:bg-red-900 hover:text-white transition-all shadow-[0_0_15px_rgba(139,0,0,0.3)] animate-pulse"
+          >
+            [ ENTER ARCHIVES ]
+          </button>
         )}
       </div>
     );
@@ -240,7 +251,11 @@ const App: React.FC = () => {
                     return <p key={li} className="mb-4">{line}</p>;
                   })}
                 </div>
-              ) : msg.content}
+              ) : (
+                <div className={msg.role === 'system' ? 'text-red-500 italic font-mono text-[10px]' : ''}>
+                  {msg.content}
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -262,7 +277,7 @@ const App: React.FC = () => {
             disabled={isAiLoading}
           />
           <button 
-            className="px-8 bg-red-950 text-white font-noir text-xs tracking-widest hover:bg-red-800 disabled:opacity-50 transition-all"
+            className="px-8 bg-red-950 text-white font-noir text-xs tracking-widest hover:bg-red-800 disabled:opacity-50 transition-all uppercase"
             disabled={isAiLoading}
           >
             EXECUTE
