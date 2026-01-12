@@ -4,10 +4,7 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  define: {
-    // 플랫폼이 런타임에 주입할 수 있도록 문자열 그대로를 유지하거나 환경 변수를 참조하게 합니다.
-    'process.env.API_KEY': JSON.stringify(process.env.API_KEY)
-  },
+  // define 블록을 제거하여 플랫폼의 런타임 환경 변수 주입을 방해하지 않도록 합니다.
   build: {
     outDir: 'dist',
     target: 'esnext'
