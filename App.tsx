@@ -53,7 +53,7 @@ const App: React.FC = () => {
   const callGemini = async (prompt: string) => {
     const apiKey = process.env.API_KEY;
     
-    if (!apiKey || apiKey.includes("API_KEY")) {
+    if (!apiKey || apiKey.includes("API_KEY") || apiKey === "") {
       setApiError("API_KEY_MISSING");
       throw new Error("API_KEY_MISSING");
     }
@@ -72,7 +72,8 @@ const App: React.FC = () => {
       return response.text;
     } catch (e: any) {
       console.error("API Error:", e);
-      if (e.message?.includes("not found") || e.message?.includes("403")) {
+      const errorStr = e.message?.toLowerCase() || "";
+      if (errorStr.includes("not found") || errorStr.includes("403") || errorStr.includes("permission")) {
         setApiError("PERMISSION_DENIED");
         throw new Error("PERMISSION_DENIED");
       }
@@ -119,7 +120,7 @@ const App: React.FC = () => {
         timestamp: new Date().toLocaleTimeString() 
       }]);
     } catch (e: any) {
-      // Error is handled via callGemini throwing and setting apiError state
+      // Error handled by callGemini setting apiError
     } finally {
       setIsAiLoading(false);
     }
@@ -162,7 +163,7 @@ const App: React.FC = () => {
               {apiError === "API_KEY_MISSING" ? (
                 <>
                   <p>1. Cloudflare Pages 대시보드로 이동하세요.</p>
-                  <p>2. Settings -> Variables에서 <span className="text-white font-bold">API_KEY</span>를 추가하세요.</p>
+                  <p>2. Settings &rarr; Variables에서 <span className="text-white font-bold">API_KEY</span>를 추가하세요.</p>
                   <p>3. 혹은 아래 버튼을 눌러 AI Studio에서 키를 선택하세요.</p>
                 </>
               ) : (
