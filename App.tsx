@@ -39,22 +39,29 @@ const App: React.FC = () => {
 
   const handleEnter = () => setLoading(false);
 
+  // 시스템 초기화 (롤백)
+  const resetApp = () => {
+    if (window.confirm("모든 데이터가 초기화됩니다. 처음으로 돌아가시겠습니까?")) {
+      setStep('profile');
+      setMessages([]);
+      setProfile({ name: '', age: '', appearance: '', personality: '', role: '' });
+      setUserInput('');
+    }
+  };
+
   const startStory = async () => {
-    // API 키 존재 여부 확인
     if (!process.env.API_KEY) {
-      console.error("API_KEY is missing in process.env");
-      alert("환경 변수 API_KEY가 설정되지 않았습니다. Cloudflare Pages 설정에서 API_KEY를 추가하고 다시 배포해 주세요.");
+      alert("API_KEY가 설정되지 않았습니다. Cloudflare 설정을 확인하세요.");
       return;
     }
 
     setStep('chat');
     setIsAiLoading(true);
     try {
-      // 호출 직전에 인스턴스 생성 (최신 가이드라인 준수)
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
-        contents: "신규 세션을 시작하라. 팍한의 집무실에서 주인공을 맞이하는 첫 장면을 묘사하라.",
+        contents: "신규 세션을 시작하라. 팍한의 집무실에서 주인공을 맞이하는 첫 장면을 묘사하라. 주변의 차가운 공기, 보드카 냄새, 그리고 팍한의 압도적인 존재감을 강조하라.",
         config: {
           systemInstruction: SYSTEM_PROMPT_TEMPLATE(profile),
           temperature: 0.9,
@@ -68,13 +75,9 @@ const App: React.FC = () => {
       }]);
     } catch (e: any) {
       console.error("Initial story generation failed:", e);
-      let errorMsg = "통신 오류가 발생했습니다.";
-      if (e.message?.includes("entity was not found")) {
-        errorMsg = "API 키가 올바르지 않거나 프로젝트 설정을 찾을 수 없습니다.";
-      }
       setMessages([{ 
         role: 'system', 
-        content: errorMsg, 
+        content: "통신 오류: API 키 혹은 프로젝트 설정을 확인하세요.", 
         timestamp: new Date().toLocaleTimeString() 
       }]);
     } finally {
@@ -85,10 +88,6 @@ const App: React.FC = () => {
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userInput.trim() || isAiLoading) return;
-    if (!process.env.API_KEY) {
-      alert("API 키가 없습니다.");
-      return;
-    }
 
     const text = userInput;
     setUserInput('');
@@ -96,7 +95,7 @@ const App: React.FC = () => {
     setIsAiLoading(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
         contents: text,
@@ -125,7 +124,7 @@ const App: React.FC = () => {
   if (loading) {
     return (
       <div className="fixed inset-0 bg-black flex flex-col justify-center items-center z-[100]">
-        <div className="font-noir text-3xl sm:text-4xl text-white mb-8 tracking-[0.3em] uppercase font-bold text-center">
+        <div className="font-noir text-3xl sm:text-4xl text-white mb-8 tracking-[0.3em] uppercase font-bold text-center px-4">
           Entering the White Silence
         </div>
         {!showEnter ? (
@@ -155,7 +154,7 @@ const App: React.FC = () => {
   if (step === 'profile') {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-[#050505]">
-        <div className="max-w-md w-full border border-neutral-800 bg-black/40 backdrop-blur-md p-8 rounded-sm border-l-4 border-l-red-900">
+        <div className="max-w-md w-full border border-neutral-800 bg-black/40 backdrop-blur-md p-8 rounded-sm border-l-4 border-l-red-900 shadow-2xl">
           <h1 className="font-noir text-2xl text-white mb-1 uppercase tracking-widest">Dossier Assignment</h1>
           <p className="font-mono text-[10px] text-neutral-500 mb-8 tracking-widest uppercase">Subject Registration</p>
           <form onSubmit={(e) => { e.preventDefault(); setStep('dashboard'); }} className="space-y-6">
@@ -179,10 +178,10 @@ const App: React.FC = () => {
             </div>
             <textarea 
               className="w-full bg-neutral-900/50 border border-neutral-800 p-3 text-sm focus:border-red-900 outline-none h-24 font-typewriter text-white"
-              placeholder="APPEARANCE"
+              placeholder="APPEARANCE & VIBE"
               value={profile.appearance} onChange={e => setProfile({...profile, appearance: e.target.value})}
             />
-            <button className="w-full bg-red-950 text-white font-noir py-4 text-xs tracking-widest hover:bg-red-800 transition-all uppercase">
+            <button className="w-full bg-red-950 text-white font-noir py-4 text-xs tracking-widest hover:bg-red-800 transition-all uppercase shadow-lg">
               Confirm Identity
             </button>
           </form>
@@ -199,16 +198,16 @@ const App: React.FC = () => {
             <h1 className="text-4xl font-noir text-white tracking-tighter uppercase italic">Volchya <span className="text-red-700">Staya</span></h1>
             <p className="text-[10px] text-neutral-500 tracking-[0.4em] uppercase mt-2">Bratva Noir Archives // Moscow</p>
           </div>
-          <div className="text-right font-mono text-[10px] text-neutral-400">
-            LOGGED_AS: {profile.name} // {profile.role}
-          </div>
+          <button onClick={resetApp} className="text-[10px] font-mono text-neutral-600 hover:text-red-600 transition-colors uppercase tracking-tighter">
+            [ RESET_PROFILE ]
+          </button>
         </header>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-20">
           {KEY_PERSONNEL.map((p, i) => (
             <div key={i} className="group relative border border-neutral-900 bg-neutral-950/30 overflow-hidden hover:border-red-900/50 transition-all duration-500">
               <div className="aspect-[3/4] grayscale group-hover:grayscale-0 transition-all duration-700 overflow-hidden">
-                <img src={p.image} className="w-full h-full object-cover" alt={p.name} />
+                <img src={p.image} className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-1000" alt={p.name} />
               </div>
               <div className="p-4 border-t border-neutral-900">
                 <p className="font-noir text-[9px] text-red-700 tracking-[0.2em] mb-1 uppercase">{p.alias}</p>
@@ -227,7 +226,7 @@ const App: React.FC = () => {
           </p>
           <button 
             onClick={startStory}
-            className="px-16 py-4 bg-white text-black font-noir font-bold text-xs tracking-widest hover:bg-neutral-300 transition-all uppercase"
+            className="px-16 py-4 bg-white text-black font-noir font-bold text-xs tracking-widest hover:bg-neutral-300 transition-all uppercase shadow-[0_0_30px_rgba(255,255,255,0.1)]"
           >
             Deploy Session
           </button>
@@ -238,17 +237,22 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen flex flex-col bg-[#050505]">
-      <header className="p-4 border-b border-neutral-900 flex justify-between items-center bg-black/80 z-20">
-        <div className="font-noir text-sm tracking-[0.3em] text-white">VOLCHYA <span className="text-red-700">STAYA</span></div>
+      <header className="p-4 border-b border-neutral-900 flex justify-between items-center bg-black/80 z-20 backdrop-blur-md">
+        <div className="flex items-center gap-4">
+          <div className="font-noir text-sm tracking-[0.3em] text-white">VOLCHYA <span className="text-red-700">STAYA</span></div>
+          <button onClick={resetApp} className="text-[9px] font-mono text-neutral-600 hover:text-red-800 transition-colors uppercase ml-4">
+            [ TERMINATE ]
+          </button>
+        </div>
         <div className="font-mono text-[9px] text-neutral-500 uppercase tracking-widest">Moscow Time: {new Date().toLocaleTimeString()}</div>
       </header>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-8 max-w-4xl mx-auto w-full z-10">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-8 max-w-4xl mx-auto w-full z-10 scroll-smooth">
         {messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[85%] ${msg.role === 'user' ? 'bg-neutral-900 p-4 border border-neutral-800 font-typewriter text-sm text-white' : 'space-y-4'}`}>
+            <div className={`max-w-[85%] ${msg.role === 'user' ? 'bg-neutral-900/50 p-4 border border-neutral-800 font-typewriter text-sm text-white' : 'space-y-4 w-full'}`}>
               {msg.role === 'assistant' ? (
-                <div className="text-neutral-300 font-light leading-relaxed text-sm">
+                <div className="text-neutral-300 font-light leading-relaxed text-sm whitespace-pre-wrap">
                   {msg.content.split('\n').map((line, li) => {
                     if (line.includes('|')) {
                       const [name, rest] = line.split('|');
@@ -258,6 +262,9 @@ const App: React.FC = () => {
                           <span className="text-white italic">{rest}</span>
                         </p>
                       );
+                    }
+                    if (line.trim().startsWith('`') && line.trim().endsWith('`')) {
+                      return <p key={li} className="font-mono text-[10px] text-neutral-500 mb-6 bg-neutral-900/30 p-2 border-l-2 border-red-900">{line.replace(/`/g, '')}</p>
                     }
                     return <p key={li} className="mb-4">{line}</p>;
                   })}
@@ -271,7 +278,7 @@ const App: React.FC = () => {
           </div>
         ))}
         {isAiLoading && (
-          <div className="flex gap-2">
+          <div className="flex gap-2 p-2">
             <div className="w-1.5 h-1.5 bg-red-900 rounded-full animate-bounce"></div>
             <div className="w-1.5 h-1.5 bg-red-900 rounded-full animate-bounce delay-100"></div>
             <div className="w-1.5 h-1.5 bg-red-900 rounded-full animate-bounce delay-200"></div>
@@ -282,7 +289,7 @@ const App: React.FC = () => {
       <div className="p-6 bg-black border-t border-neutral-900 z-20">
         <form onSubmit={sendMessage} className="max-w-4xl mx-auto flex gap-4">
           <input 
-            className="flex-1 bg-neutral-900 border border-neutral-800 p-4 text-sm text-white focus:border-red-900 outline-none font-typewriter"
+            className="flex-1 bg-neutral-900 border border-neutral-800 p-4 text-sm text-white focus:border-red-900 outline-none font-typewriter placeholder-neutral-700"
             placeholder="TYPE YOUR RESPONSE..."
             value={userInput} onChange={e => setUserInput(e.target.value)}
             disabled={isAiLoading}
@@ -291,7 +298,7 @@ const App: React.FC = () => {
             className="px-8 bg-red-950 text-white font-noir text-xs tracking-widest hover:bg-red-800 disabled:opacity-50 transition-all uppercase"
             disabled={isAiLoading}
           >
-            EXECUTE
+            {isAiLoading ? '...' : 'EXECUTE'}
           </button>
         </form>
       </div>
