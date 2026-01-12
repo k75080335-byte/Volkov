@@ -39,69 +39,61 @@ const App: React.FC = () => {
 
   const handleEnter = () => setLoading(false);
 
-  const callGemini = async (prompt: string, isInitial: boolean = false) => {
+  // AI Studio 키 선택창 열기
+  const handleKeySetup = async () => {
     const aiStudio = (window as any).aistudio;
-    
-    // 1. AI Studio 환경일 경우 키 선택 확인
-    if (aiStudio) {
-      const hasKey = await aiStudio.hasSelectedApiKey();
-      if (!hasKey) await aiStudio.openSelectKey();
+    if (aiStudio && aiStudio.openSelectKey) {
+      await aiStudio.openSelectKey();
+    } else {
+      alert("이 기능은 Google AI Studio 환경에서만 작동하거나, 환경 변수 API_KEY가 설정되어 있어야 합니다.");
     }
+  };
 
-    const apiKey = process.env.API_KEY;
-    if (!apiKey) {
-      throw new Error("API_KEY_NOT_SET");
-    }
-
-    const ai = new GoogleGenAI({ apiKey });
+  const callGemini = async (prompt: string) => {
+    // 호출 직전에 인스턴스 생성 (최신 키 반영을 위해 필수)
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
     
-    // 시도할 모델 순서 (Pro가 안되면 Flash로)
-    const modelsToTry = ['gemini-3-pro-preview', 'gemini-3-flash-preview'];
-    let lastError = null;
-
-    for (const modelName of modelsToTry) {
-      try {
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: prompt,
-          config: {
-            systemInstruction: SYSTEM_PROMPT_TEMPLATE(profile),
-            temperature: 0.9,
-          }
-        });
-        return response.text;
-      } catch (e: any) {
-        lastError = e;
-        console.warn(`${modelName} 시도 실패:`, e.message);
-        // "Requested entity was not found" (404)는 보통 모델 권한 문제임
-        if (e.message?.includes("not found") || e.message?.includes("403")) {
-          continue; // 다음 모델로 시도
+    try {
+      const response = await ai.models.generateContent({
+        // 가장 안정적이고 빠른 최신 모델로 변경
+        model: 'gemini-3-flash-preview',
+        contents: prompt,
+        config: {
+          systemInstruction: SYSTEM_PROMPT_TEMPLATE(profile),
+          temperature: 0.8,
+          topP: 0.95,
         }
-        throw e; // 치명적 오류는 중단
+      });
+      return response.text;
+    } catch (e: any) {
+      console.error("Gemini API Error:", e);
+      if (e.message?.includes("not found") || e.message?.includes("403")) {
+        throw new Error("KEY_PERMISSION_ERROR");
       }
+      throw e;
     }
-    throw lastError;
   };
 
   const startStory = async () => {
     setStep('chat');
     setIsAiLoading(true);
     try {
-      const text = await callGemini("신규 세션을 시작하라. 팍한의 집무실에서 주인공을 맞이하는 첫 장면을 묘사하라. 주변의 차가운 공기, 보드카 냄새, 그리고 팍한의 압도적인 존재감을 강조하라.", true);
+      const text = await callGemini("신규 세션을 시작하라. 팍한의 집무실에서 주인공을 맞이하는 첫 장면을 묘사하라. 주변의 차가운 공기, 보드카 냄새, 그리고 팍한의 압도적인 존재감을 강조하라.");
       setMessages([{ 
         role: 'assistant', 
-        content: text || "침묵이 흐릅니다...", 
+        content: text || "시스템이 응답하지 않습니다. 다시 시도하십시오.", 
         timestamp: new Date().toLocaleTimeString() 
       }]);
     } catch (e: any) {
-      console.error("Story Start Error:", e);
-      let errorHint = "연결에 실패했습니다.";
-      if (e.message === "API_KEY_NOT_SET") {
-        errorHint = "API 키가 설정되지 않았습니다. Cloudflare Settings -> Variables에서 API_KEY를 등록해주세요.";
-      } else if (e.message?.includes("not found")) {
-        errorHint = "선택하신 키가 이 모델을 지원하지 않습니다. AI Studio에서 'Choose a paid key'를 다시 확인해주세요.";
+      let errorMsg = "데이터 전송 중 치명적인 오류가 발생했습니다.";
+      if (e.message === "KEY_PERMISSION_ERROR") {
+        errorMsg = "API 키 권한이 부족하거나 모델을 찾을 수 없습니다. 아래 [FIX KEY] 버튼을 눌러 유료 프로젝트의 키를 선택하거나 Cloudflare 설정을 확인하십시오.";
       }
-      setMessages([{ role: 'system', content: `[ERROR] ${errorHint}`, timestamp: new Date().toLocaleTimeString() }]);
+      setMessages([{ 
+        role: 'system', 
+        content: `[SYSTEM_FAILURE] ${errorMsg}`, 
+        timestamp: new Date().toLocaleTimeString() 
+      }]);
     } finally {
       setIsAiLoading(false);
     }
@@ -124,14 +116,18 @@ const App: React.FC = () => {
         timestamp: new Date().toLocaleTimeString() 
       }]);
     } catch (e: any) {
-      setMessages(prev => [...prev, { role: 'system', content: "메시지 전송 실패. 네트워크 상태나 API 키를 확인하세요.", timestamp: new Date().toLocaleTimeString() }]);
+      setMessages(prev => [...prev, { 
+        role: 'system', 
+        content: "통신 프로토콜 오류. 다시 시도하거나 키 설정을 확인하십시오.", 
+        timestamp: new Date().toLocaleTimeString() 
+      }]);
     } finally {
       setIsAiLoading(false);
     }
   };
 
   const resetApp = () => {
-    if (confirm("초기화하시겠습니까?")) {
+    if (confirm("아카이브를 초기화하시겠습니까? 모든 진행 데이터가 삭제됩니다.")) {
       setStep('profile');
       setMessages([]);
       setProfile({ name: '', age: '', appearance: '', personality: '', role: '' });
@@ -141,14 +137,14 @@ const App: React.FC = () => {
   if (loading) {
     return (
       <div className="fixed inset-0 bg-black flex flex-col justify-center items-center z-[100]">
-        <div className="font-noir text-3xl text-white mb-8 tracking-[0.3em] uppercase animate-pulse">Entering the White Silence</div>
+        <div className="font-noir text-3xl text-white mb-8 tracking-[0.3em] uppercase">Initialising Archive</div>
         {!showEnter ? (
-          <div className="w-64 h-1 bg-neutral-900 rounded overflow-hidden">
+          <div className="w-64 h-0.5 bg-neutral-900 rounded overflow-hidden">
             <div className="h-full bg-red-900 transition-all duration-300" style={{ width: `${progress}%` }}></div>
           </div>
         ) : (
-          <button onClick={handleEnter} className="border border-red-900 bg-black text-red-600 px-10 py-3 font-noir tracking-[0.3em] text-xs uppercase hover:bg-red-900 hover:text-white transition-all shadow-[0_0_15px_rgba(139,0,0,0.3)]">
-            [ ACCESS GRANTED ]
+          <button onClick={handleEnter} className="border border-red-900 bg-black text-red-600 px-12 py-3 font-noir tracking-[0.4em] text-xs uppercase hover:bg-red-900 hover:text-white transition-all shadow-[0_0_20px_rgba(139,0,0,0.2)]">
+            [ ACCESS ]
           </button>
         )}
       </div>
@@ -157,18 +153,30 @@ const App: React.FC = () => {
 
   if (step === 'profile') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-[#050505]">
-        <div className="max-w-md w-full border border-neutral-800 bg-black/40 p-8 border-l-4 border-l-red-900 shadow-2xl">
-          <h1 className="font-noir text-2xl text-white mb-1 tracking-widest uppercase">Identity Registration</h1>
-          <p className="font-mono text-[9px] text-neutral-600 mb-8 uppercase tracking-widest">Moscow Central Archives</p>
+      <div className="min-h-screen flex items-center justify-center p-6 bg-[#050505] bg-grain">
+        <div className="max-w-md w-full border border-neutral-800 bg-black/80 p-10 border-l-4 border-l-red-900 shadow-2xl backdrop-blur-sm">
+          <h1 className="font-noir text-2xl text-white mb-1 tracking-widest uppercase">Identity Dossier</h1>
+          <p className="font-mono text-[9px] text-neutral-600 mb-8 uppercase tracking-widest italic">Confidential Registry</p>
           <form onSubmit={(e) => { e.preventDefault(); setStep('dashboard'); }} className="space-y-6">
-            <input className="w-full bg-neutral-900 border border-neutral-800 p-3 text-sm focus:border-red-900 outline-none font-typewriter text-white" placeholder="NAME" value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} required />
-            <div className="grid grid-cols-2 gap-4">
-              <input className="w-full bg-neutral-900 border border-neutral-800 p-3 text-sm focus:border-red-900 outline-none font-typewriter text-white" placeholder="AGE" value={profile.age} onChange={e => setProfile({...profile, age: e.target.value})} />
-              <input className="w-full bg-neutral-900 border border-neutral-800 p-3 text-sm focus:border-red-900 outline-none font-typewriter text-white" placeholder="ROLE" value={profile.role} onChange={e => setProfile({...profile, role: e.target.value})} />
+            <div className="space-y-1">
+              <label className="text-[8px] font-noir text-neutral-500 tracking-widest uppercase">Subject Name</label>
+              <input className="w-full bg-neutral-900/50 border border-neutral-800 p-3 text-sm focus:border-red-900 outline-none font-typewriter text-white transition-colors" placeholder="NAME" value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} required />
             </div>
-            <textarea className="w-full bg-neutral-900 border border-neutral-800 p-3 text-sm focus:border-red-900 outline-none h-24 font-typewriter text-white" placeholder="APPEARANCE & VIBE" value={profile.appearance} onChange={e => setProfile({...profile, appearance: e.target.value})} />
-            <button className="w-full bg-red-950 text-white font-noir py-4 text-xs tracking-widest hover:bg-red-800 transition-all uppercase">Enter the Pack</button>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-[8px] font-noir text-neutral-500 tracking-widest uppercase">Age</label>
+                <input className="w-full bg-neutral-900/50 border border-neutral-800 p-3 text-sm focus:border-red-900 outline-none font-typewriter text-white" placeholder="24" value={profile.age} onChange={e => setProfile({...profile, age: e.target.value})} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[8px] font-noir text-neutral-500 tracking-widest uppercase">Role</label>
+                <input className="w-full bg-neutral-900/50 border border-neutral-800 p-3 text-sm focus:border-red-900 outline-none font-typewriter text-white" placeholder="INFILTRATOR" value={profile.role} onChange={e => setProfile({...profile, role: e.target.value})} />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[8px] font-noir text-neutral-500 tracking-widest uppercase">Description</label>
+              <textarea className="w-full bg-neutral-900/50 border border-neutral-800 p-3 text-sm focus:border-red-900 outline-none h-24 font-typewriter text-white resize-none" placeholder="Physical features, personality traits..." value={profile.appearance} onChange={e => setProfile({...profile, appearance: e.target.value})} />
+            </div>
+            <button className="w-full bg-red-950 text-white font-noir py-4 text-xs tracking-widest hover:bg-red-800 transition-all uppercase shadow-lg border border-red-900/50">Submit Identity</button>
           </form>
         </div>
       </div>
@@ -177,36 +185,35 @@ const App: React.FC = () => {
 
   if (step === 'dashboard') {
     return (
-      <div className="min-h-screen p-8 max-w-7xl mx-auto">
-        <header className="mb-16 border-b border-neutral-800 pb-8 flex justify-between items-end">
+      <div className="min-h-screen p-8 max-w-7xl mx-auto bg-grain">
+        <header className="mb-16 border-b border-neutral-900 pb-8 flex justify-between items-end">
           <div>
             <h1 className="text-4xl font-noir text-white tracking-tighter uppercase italic">Volchya <span className="text-red-700">Staya</span></h1>
-            <p className="text-[10px] text-neutral-500 tracking-[0.4em] uppercase mt-2 italic font-noir">Bratva Noir System // V.1.0</p>
+            <p className="text-[10px] text-neutral-500 tracking-[0.4em] uppercase mt-2 italic font-noir">Bratva Noir Interface</p>
           </div>
-          <button onClick={resetApp} className="text-[10px] font-mono text-neutral-700 hover:text-red-600 uppercase tracking-tighter">[ TERMINATE_SESSION ]</button>
+          <button onClick={resetApp} className="text-[10px] font-mono text-neutral-700 hover:text-red-600 uppercase tracking-tighter transition-colors underline underline-offset-4">[ TERMINATE_SESSION ]</button>
         </header>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-20">
           {KEY_PERSONNEL.map((p, i) => (
-            <div key={i} className="group border border-neutral-900 bg-neutral-950/50 hover:border-red-900/40 transition-all overflow-hidden">
+            <div key={i} className="group border border-neutral-900 bg-neutral-950/50 hover:border-red-900/40 transition-all overflow-hidden relative">
               <div className="aspect-[3/4] grayscale group-hover:grayscale-0 transition-all duration-1000 overflow-hidden">
                 <img src={p.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" alt={p.name} />
               </div>
-              <div className="p-4 border-t border-neutral-900">
+              <div className="p-4 border-t border-neutral-900 bg-black/60 backdrop-blur-sm">
                 <p className="font-noir text-[8px] text-red-800 tracking-widest mb-1 uppercase">{p.alias}</p>
                 <h3 className="font-noir text-white text-base">{p.name}</h3>
-                <p className="text-[10px] text-neutral-500 mt-2 font-typewriter line-clamp-2">{p.description}</p>
+                <p className="text-[10px] text-neutral-500 mt-2 font-typewriter line-clamp-2 opacity-70 italic">"{p.description}"</p>
               </div>
             </div>
           ))}
         </div>
 
-        <div className="max-w-xl mx-auto text-center border border-neutral-900 p-12 bg-neutral-950/50 backdrop-blur-sm relative">
-          <div className="absolute top-0 left-0 w-full h-0.5 bg-red-900 opacity-50"></div>
-          <h2 className="font-noir text-xl text-white mb-4 italic tracking-widest">모스크바의 밤은 길고 차갑습니다.</h2>
-          <p className="font-script text-lg text-neutral-400 mb-8 italic">"살아남는 것은 늑대뿐, 나머지는 먹잇감이다."</p>
-          <button onClick={startStory} className="px-16 py-4 bg-white text-black font-noir font-bold text-xs tracking-[0.2em] hover:bg-neutral-300 transition-all uppercase shadow-2xl">
-            INITIALIZE SCENARIO
+        <div className="max-w-xl mx-auto text-center border border-neutral-900 p-12 bg-neutral-950/30 backdrop-blur-md relative border-t-2 border-t-red-900 shadow-2xl">
+          <h2 className="font-noir text-xl text-white mb-4 italic tracking-widest">Moscow awaits your silence.</h2>
+          <p className="font-script text-lg text-neutral-400 mb-8 italic">"Only the wolves survive the winter. The rest are merely meat."</p>
+          <button onClick={startStory} className="px-16 py-4 bg-white text-black font-noir font-bold text-xs tracking-[0.2em] hover:bg-neutral-300 transition-all uppercase shadow-[0_0_30px_rgba(255,255,255,0.05)]">
+            Begin Mission
           </button>
         </div>
       </div>
@@ -214,60 +221,66 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-[#050505] overflow-hidden">
+    <div className="h-screen flex flex-col bg-[#050505] overflow-hidden bg-grain">
       <header className="p-4 border-b border-neutral-900 flex justify-between items-center bg-black/90 backdrop-blur-md z-30">
         <div className="flex items-center gap-4">
-          <div className="font-noir text-xs tracking-widest text-white">VOLCHYA <span className="text-red-700 font-bold">STAYA</span></div>
+          <div className="font-noir text-xs tracking-widest text-white">VOLCHYA <span className="text-red-700 font-bold italic">STAYA</span></div>
           <div className="h-3 w-[1px] bg-neutral-800"></div>
-          <button onClick={resetApp} className="text-[9px] font-mono text-neutral-600 hover:text-red-700 uppercase">[ EXIT ]</button>
+          <button onClick={resetApp} className="text-[9px] font-mono text-neutral-600 hover:text-red-700 uppercase transition-colors">[ EXIT ]</button>
         </div>
-        <div className="font-mono text-[9px] text-neutral-600 uppercase tracking-widest hidden sm:block">STATUS: ARCHIVE_DEPLOYED</div>
+        <div className="flex items-center gap-6">
+          <button onClick={handleKeySetup} className="text-[8px] font-mono text-red-900/50 hover:text-red-600 uppercase tracking-tighter border border-red-900/20 px-2 py-0.5 rounded transition-all">[ FIX_KEY ]</button>
+          <div className="font-mono text-[9px] text-neutral-600 uppercase tracking-widest hidden sm:block">STATUS: CONNECTION_ESTABLISHED</div>
+        </div>
       </header>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-12 max-w-4xl mx-auto w-full z-10 scroll-smooth">
         {messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[90%] sm:max-w-[80%] ${msg.role === 'user' ? 'bg-neutral-900/40 p-4 border border-neutral-800/50 font-typewriter text-sm text-neutral-200 shadow-lg' : 'w-full'}`}>
+            <div className={`max-w-[90%] sm:max-w-[80%] ${msg.role === 'user' ? 'bg-neutral-900/30 p-5 border border-neutral-800 font-typewriter text-sm text-neutral-200 shadow-xl' : 'w-full'}`}>
               {msg.role === 'assistant' ? (
                 <div className="text-neutral-300 font-light leading-relaxed text-sm whitespace-pre-wrap">
                   {msg.content.split('\n').map((line, li) => {
                     if (line.includes('|')) {
                       const [name, rest] = line.split('|');
                       return (
-                        <p key={li} className="my-6 border-l-2 border-red-900/30 pl-4">
-                          <span className="font-noir text-red-700 text-[10px] tracking-widest block mb-1">{name.trim()}</span>
+                        <p key={li} className="my-6 border-l-2 border-red-900/40 pl-5 bg-red-950/5 py-2">
+                          <span className="font-noir text-red-700 text-[10px] tracking-widest block mb-1 font-bold uppercase">{name.trim()}</span>
                           <span className="text-white italic font-medium">{rest}</span>
                         </p>
                       );
                     }
-                    if (line.trim().startsWith('`')) return <p key={li} className="font-mono text-[9px] text-neutral-600 mb-6 tracking-widest opacity-60 italic">{line.replace(/`/g, '')}</p>
+                    if (line.trim().startsWith('`')) return <p key={li} className="font-mono text-[9px] text-neutral-700 mb-6 tracking-widest opacity-80 border-b border-neutral-900 pb-1">{line.replace(/`/g, '')}</p>
                     return <p key={li} className="mb-4">{line}</p>;
                   })}
                 </div>
               ) : (
-                <div className={msg.role === 'system' ? 'text-red-800 italic font-mono text-[10px] border border-red-900/20 p-2 bg-red-900/5' : ''}>
+                <div className={msg.role === 'system' ? 'text-red-700 italic font-mono text-[10px] border border-red-900/30 p-4 bg-red-950/10 rounded-sm' : ''}>
                   {msg.content}
+                  {msg.content.includes('[SYSTEM_FAILURE]') && (
+                    <button onClick={handleKeySetup} className="block mt-4 text-white bg-red-900 px-4 py-2 rounded text-[10px] font-noir uppercase hover:bg-red-800 transition-all">Fix API Connection</button>
+                  )}
                 </div>
               )}
             </div>
           </div>
         ))}
         {isAiLoading && (
-          <div className="flex gap-1.5 p-2 items-center">
-            <div className="w-1 h-1 bg-red-900 rounded-full animate-ping"></div>
-            <div className="text-[8px] font-mono text-red-900 tracking-widest uppercase opacity-50">Transmitting...</div>
+          <div className="flex gap-2 p-2 items-center opacity-50">
+            <div className="w-1 h-1 bg-red-700 rounded-full animate-ping"></div>
+            <div className="text-[8px] font-mono text-red-700 tracking-[0.3em] uppercase">Relaying through encrypted channel...</div>
           </div>
         )}
       </div>
 
-      <div className="p-4 sm:p-6 bg-black border-t border-neutral-900 z-30">
+      <div className="p-4 sm:p-6 bg-black border-t border-neutral-900 z-30 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
         <form onSubmit={sendMessage} className="max-w-4xl mx-auto flex gap-3">
           <input 
-            className="flex-1 bg-neutral-950 border border-neutral-800 p-4 text-sm text-white focus:border-red-950 outline-none font-typewriter placeholder-neutral-800 transition-all"
+            className="flex-1 bg-neutral-950 border border-neutral-800 p-4 text-sm text-white focus:border-red-900 outline-none font-typewriter placeholder-neutral-800 transition-all focus:bg-neutral-900 shadow-inner"
             placeholder="TYPE YOUR RESPONSE..." value={userInput} onChange={e => setUserInput(e.target.value)} disabled={isAiLoading}
           />
-          <button className="px-6 sm:px-10 bg-neutral-900 text-white font-noir text-[10px] tracking-widest hover:bg-red-950 disabled:opacity-30 transition-all uppercase border border-neutral-800" disabled={isAiLoading}>
-            EXECUTE
+          <button className="px-6 sm:px-12 bg-neutral-900 text-white font-noir text-[10px] tracking-[0.2em] hover:bg-red-950 disabled:opacity-30 transition-all uppercase border border-neutral-800 hover:border-red-900" disabled={isAiLoading}>
+            Send
           </button>
         </form>
       </div>
