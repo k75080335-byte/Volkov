@@ -16,8 +16,6 @@ const App: React.FC = () => {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const API_KEY = process.env.API_KEY || '';
-
   // 로딩 애니메이션
   useEffect(() => {
     if (loading) {
@@ -30,7 +28,7 @@ const App: React.FC = () => {
           }
           return prev + 5;
         });
-      }, 100);
+      }, 50);
       return () => clearInterval(timer);
     }
   }, [loading]);
@@ -42,32 +40,41 @@ const App: React.FC = () => {
   const handleEnter = () => setLoading(false);
 
   const startStory = async () => {
-    if (!API_KEY) {
-      alert("환경 변수 API_KEY가 설정되지 않았습니다. Cloudflare 대시보드에서 설정해 주세요.");
+    // API 키 존재 여부 확인
+    if (!process.env.API_KEY) {
+      console.error("API_KEY is missing in process.env");
+      alert("환경 변수 API_KEY가 설정되지 않았습니다. Cloudflare Pages 설정에서 API_KEY를 추가하고 다시 배포해 주세요.");
       return;
     }
+
     setStep('chat');
     setIsAiLoading(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: API_KEY });
+      // 호출 직전에 인스턴스 생성 (최신 가이드라인 준수)
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
-        contents: "신규 세션을 시작하라. 팍한의 집무실에서 주인공을 맞이하는 장면으로.",
+        contents: "신규 세션을 시작하라. 팍한의 집무실에서 주인공을 맞이하는 첫 장면을 묘사하라.",
         config: {
           systemInstruction: SYSTEM_PROMPT_TEMPLATE(profile),
           temperature: 0.9,
         }
       });
+
       setMessages([{ 
         role: 'assistant', 
         content: response.text || "침묵만이 흐릅니다...", 
         timestamp: new Date().toLocaleTimeString() 
       }]);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.error("Initial story generation failed:", e);
+      let errorMsg = "통신 오류가 발생했습니다.";
+      if (e.message?.includes("entity was not found")) {
+        errorMsg = "API 키가 올바르지 않거나 프로젝트 설정을 찾을 수 없습니다.";
+      }
       setMessages([{ 
         role: 'system', 
-        content: "통신 오류: API 키가 유효하지 않거나 설정되지 않았습니다.", 
+        content: errorMsg, 
         timestamp: new Date().toLocaleTimeString() 
       }]);
     } finally {
@@ -78,6 +85,10 @@ const App: React.FC = () => {
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userInput.trim() || isAiLoading) return;
+    if (!process.env.API_KEY) {
+      alert("API 키가 없습니다.");
+      return;
+    }
 
     const text = userInput;
     setUserInput('');
@@ -85,7 +96,7 @@ const App: React.FC = () => {
     setIsAiLoading(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: API_KEY });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
         contents: text,
@@ -100,10 +111,10 @@ const App: React.FC = () => {
         timestamp: new Date().toLocaleTimeString() 
       }]);
     } catch (e) {
-      console.error(e);
+      console.error("Message sending failed:", e);
       setMessages(prev => [...prev, { 
         role: 'system', 
-        content: "서버와의 연결이 원활하지 않습니다.", 
+        content: "연결 오류: 메시지를 전송할 수 없습니다.", 
         timestamp: new Date().toLocaleTimeString() 
       }]);
     } finally {
