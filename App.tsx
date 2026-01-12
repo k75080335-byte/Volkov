@@ -1,12 +1,17 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { KEY_PERSONNEL, SYSTEM_PROMPT_TEMPLATE } from './constants';
 import { Message, UserProfile } from './types';
 
+// The global `window.aistudio` type is already provided by the environment as `AIStudio`.
+// Removing the redundant declaration to avoid type conflict errors.
+
 const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState(0);
   const [showEnter, setShowEnter] = useState(false);
+  const [isKeySelected, setIsKeySelected] = useState<boolean | null>(null);
   const [step, setStep] = useState<'profile' | 'dashboard' | 'chat'>('profile');
   const [profile, setProfile] = useState<UserProfile>({
     name: '', age: '', appearance: '', personality: '', role: ''
@@ -15,6 +20,30 @@ const App: React.FC = () => {
   const [userInput, setUserInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // API 키 선택 상태 확인
+  useEffect(() => {
+    const checkKey = async () => {
+      // Accessing aistudio via any to bypass type check as the environment provides it.
+      const aiStudio = (window as any).aistudio;
+      if (aiStudio) {
+        const hasKey = await aiStudio.hasSelectedApiKey();
+        setIsKeySelected(hasKey);
+      } else {
+        // 로컬 환경이나 기타 환경 대응
+        setIsKeySelected(!!process.env.API_KEY);
+      }
+    };
+    checkKey();
+  }, []);
+
+  const handleOpenKeySelection = async () => {
+    const aiStudio = (window as any).aistudio;
+    if (aiStudio) {
+      await aiStudio.openSelectKey();
+      setIsKeySelected(true); // 선택 후 즉시 성공으로 가정하고 진행
+    }
+  };
 
   // 로딩 애니메이션
   useEffect(() => {
@@ -39,7 +68,6 @@ const App: React.FC = () => {
 
   const handleEnter = () => setLoading(false);
 
-  // 시스템 초기화 (롤백)
   const resetApp = () => {
     if (window.confirm("모든 데이터가 초기화됩니다. 처음으로 돌아가시겠습니까?")) {
       setStep('profile');
@@ -50,14 +78,17 @@ const App: React.FC = () => {
   };
 
   const startStory = async () => {
-    if (!process.env.API_KEY) {
-      alert("API_KEY가 설정되지 않았습니다. Cloudflare 설정을 확인하세요.");
+    // 키가 없으면 선택창을 띄우도록 유도 (alert 대신 UI로 처리)
+    if (!isKeySelected) {
+      handleOpenKeySelection();
       return;
     }
 
     setStep('chat');
     setIsAiLoading(true);
     try {
+      // Create a new GoogleGenAI instance right before the API call to ensure the latest key is used.
+      // process.env.API_KEY is used directly as per instructions.
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
@@ -75,9 +106,14 @@ const App: React.FC = () => {
       }]);
     } catch (e: any) {
       console.error("Initial story generation failed:", e);
+      // "Requested entity was not found" 에러 시 키 재선택 유도
+      if (e.message?.includes("not found")) {
+        setIsKeySelected(false);
+        alert("API 키 프로젝트 설정에 문제가 있습니다. 다시 선택해주세요.");
+      }
       setMessages([{ 
         role: 'system', 
-        content: "통신 오류: API 키 혹은 프로젝트 설정을 확인하세요.", 
+        content: "통신 오류: API 키 설정을 확인하거나 다시 시도하세요.", 
         timestamp: new Date().toLocaleTimeString() 
       }]);
     } finally {
@@ -95,7 +131,8 @@ const App: React.FC = () => {
     setIsAiLoading(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+      // Create a new GoogleGenAI instance right before the API call to ensure the latest key is used.
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
         contents: text,
@@ -109,7 +146,7 @@ const App: React.FC = () => {
         content: response.text || "...", 
         timestamp: new Date().toLocaleTimeString() 
       }]);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Message sending failed:", e);
       setMessages(prev => [...prev, { 
         role: 'system', 
@@ -120,6 +157,29 @@ const App: React.FC = () => {
       setIsAiLoading(false);
     }
   };
+
+  // 키 미선택 시 보여줄 화면
+  if (isKeySelected === false) {
+    return (
+      <div className="fixed inset-0 bg-black flex flex-col justify-center items-center z-[200] p-6 text-center">
+        <h2 className="font-noir text-2xl text-white mb-4 uppercase tracking-widest">Paid API Key Required</h2>
+        <p className="text-neutral-400 mb-8 max-w-md font-typewriter text-sm leading-relaxed">
+          이 시스템은 고성능 모델(Gemini 3 Pro)을 사용합니다. <br/>
+          계속하려면 결제 프로필이 연결된 Google Cloud 프로젝트의 API 키를 선택해야 합니다.
+          <br/><br/>
+          <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="text-red-700 underline underline-offset-4">
+            [ Billing Documentation ]
+          </a>
+        </p>
+        <button 
+          onClick={handleOpenKeySelection}
+          className="px-12 py-4 bg-red-950 text-white font-noir text-xs tracking-widest hover:bg-red-800 transition-all uppercase shadow-lg border border-red-900"
+        >
+          Select Paid API Key
+        </button>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
